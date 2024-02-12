@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use std::sync::Mutex;
 
 use wasm_bindgen::prelude::*;
-use serde::Serialize;
+// use serde::Serialize;
 
 // trait WFC<Cell> {
 //     fn step() -> bool;
@@ -16,16 +16,27 @@ static INSTANCE: Mutex<Option<WFC<[i64; 2], Vec<f64>>>> = Mutex::new(None);
 pub fn init_instance() {
     let mut inst = INSTANCE.lock().unwrap();
     if inst.is_none() {
+        // ' #' '##' '# ' '  '
         let constraints_list = vec![
             (0, 0, -1, 1),
+            (0, 0, -1, 0),
             (0, 0, 1, 0),
+            (0, 0, 1, 3),
             (1, 0, -1, 2),
             (1, 0, 1, 0),
+            (1, 0, -1, 3),
+            (1, 0, 1, 3),
             (2, 0, -1, 2),
             (2, 0, 1, 1),
+            (2, 0, 1, 2),
+            (2, 0, -1, 3),
+            (3, 0, -1, 0),
+            (3, 0, -1, 1),
+            (3, 0, 1, 1),
+            (3, 0, 1, 2),
         ];
         let constraints = generate_constraints(constraints_list);
-        *inst = Some(WFC::new(constraints, vec![1.0, 1.0, 1.0]));
+        *inst = Some(WFC::new(constraints, vec![1.0, 1.0, 1.0, 1.0], 42));
     }
 }
 
@@ -54,7 +65,8 @@ struct WFC<Pos, State> {
     wavefront: HashMap<Pos, State>,
     collapsed: HashMap<Pos, usize>,
     /// Forbidden neighbors: tile, axis, dir : forbidden tiles
-    constraints: HashMap<(usize, usize, i64), HashSet<usize>>
+    constraints: HashMap<(usize, usize, i64), HashSet<usize>>,
+    random_state: usize,
 }
 
 fn plogp(p: f64) -> f64 {
@@ -77,14 +89,15 @@ fn generate_constraints(constraints: Vec<(usize, usize, i64, usize)>) -> HashMap
 }
 
 impl WFC<[i64; 2], Vec<f64>> {
-    fn new(constraints: HashMap<(usize, usize, i64), HashSet<usize>>, state_weights: Vec<f64>) -> Self {
+    fn new(constraints: HashMap<(usize, usize, i64), HashSet<usize>>, state_weights: Vec<f64>, random_state: usize) -> Self {
         let weight_sum: f64 = state_weights.iter().sum();
         let weight_distrib = state_weights.iter().map(|val| val / weight_sum).collect();
         WFC {
             constraints,
             state_weights: weight_distrib,
             wavefront: HashMap::new(),
-            collapsed: HashMap::new()
+            collapsed: HashMap::new(),
+            random_state
         }
     }
 
@@ -98,6 +111,14 @@ impl WFC<[i64; 2], Vec<f64>> {
         state
     }
 
+    fn rng_next(&mut self) -> usize {
+        let a = 1664525;
+        let c = 1013904223;
+        let m = 0xFFFFFFFF; // 2**32
+        self.random_state = self.random_state.wrapping_mul(a).wrapping_add(c) % m;
+        return self.random_state;
+    }
+
     fn entropy(&self, array: &Vec<f64>) -> f64 {
         array.iter().zip(self.state_weights.iter()).map(|(state, weight)| state * weight).map(plogp).sum::<f64>() * -1.0
     }
@@ -108,14 +129,14 @@ impl WFC<[i64; 2], Vec<f64>> {
         }
         let state = self.state_at(&pos);
         self.wavefront.remove(&pos);
-        // TODO: take one that not 0 instead
         let allowed_idx: Vec<_> = state.iter().enumerate().filter_map(|(idx, val)| if *val > 0.0 {Some(idx)} else {None} ).collect();
         if allowed_idx.len() == 0 {
             return false;
         }
         // super random idx choice
-        let idx: usize = (pos[0] + pos[1] * 35345939).abs().try_into().unwrap();
-        self.collapsed.insert(pos.clone(), allowed_idx[idx % allowed_idx.len()]);
+        let idx = self.rng_next() % allowed_idx.len();
+        // TODO: take weights into account
+        self.collapsed.insert(pos.clone(), allowed_idx[idx]);
         self.propagate(pos)
     }
 
@@ -198,8 +219,6 @@ impl WFC<[i64; 2], Vec<f64>> {
         let mut stack = vec![pos];
 
         while let Some(pos) = stack.pop() {
-            // TODO: flatten
-            let mut state: Vec<f64> = self.state_at(&pos);
             // update the state of all neighbors
             for neighbors_dpos in self.neighbors() {
                 // update neighbors states if necessary
@@ -223,7 +242,7 @@ impl WFC<[i64; 2], Vec<f64>> {
             match f64::total_cmp(&self.entropy(a.1), &self.entropy(b.1)) {
                 Ordering::Greater => Ordering::Greater,
                 Ordering::Less => Ordering::Less,
-                Ordering::Equal => i64::cmp(a.0.iter().max().unwrap(), b.0.iter().max().unwrap())
+                Ordering::Equal => i64::cmp(&a.0.iter().map(|v| v.abs()).max().unwrap(), &b.0.iter().map(|v| v.abs()).max().unwrap())
             });
         let pos = match min_h_cell{
             Some(value) => value.0,
@@ -248,18 +267,20 @@ mod tests {
         // dummy example with one axis and 3 tiles (' #' '##' '# ')
         return vec![
             (0, 0, -1, 1),
+            (0, 0, -1, 0),
             (0, 0, 1, 0),
             (1, 0, -1, 2),
             (1, 0, 1, 0),
             (2, 0, -1, 2),
             (2, 0, 1, 1),
+            (2, 0, 1, 2),
         ];
     }
 
     fn simple_init() -> WFC<[i64; 2], Vec<f64>> {
         let constraint_list = simple_constraints();
         let constraints = generate_constraints(constraint_list);
-        let wfc = WFC::new(constraints, vec![1.0, 1.0, 1.0]);
+        let wfc = WFC::new(constraints, vec![1.0, 1.0, 1.0], 42);
         
         return wfc;
     }
@@ -268,7 +289,7 @@ mod tests {
     fn gen_contraints() {
         let contraints_list = simple_constraints();
         let constraints = generate_constraints(contraints_list);
-        assert_eq!(constraints.get(&(0, 0, -1)), Some(&HashSet::from([1])));
+        assert_eq!(constraints.get(&(0, 0, -1)), Some(&HashSet::from([0, 1])));
         assert_eq!(constraints.get(&(0, 0, 1)), Some(&HashSet::from([0])));
         assert!(constraints.get(&(0, 1, 1)).is_none());
     }
@@ -320,7 +341,9 @@ mod tests {
     fn first_step_ok() {
         let mut wfc = simple_init();
         assert!(wfc.step());
-        assert!(wfc.collapsed.len() == 1);
+        // depends on the random selection of which state it collapse to...
+        // TODO: remove this test when all methods are covered
+        assert_eq!(wfc.collapsed.len(), 1);
     }
 
     #[test]
@@ -331,7 +354,8 @@ mod tests {
         assert!(wfc.step());
         assert!(wfc.step());
         assert!(wfc.step());
-        assert!(wfc.collapsed.len() == 5);
-        assert!(wfc.wavefront.len() == 2);
+        // remove this assert, the only constant is the wavefront size
+        assert_eq!(wfc.collapsed.len(), 8);
+        assert_eq!(wfc.wavefront.len(), 2);
     }
 }
