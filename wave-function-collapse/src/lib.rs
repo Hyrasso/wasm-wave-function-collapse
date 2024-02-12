@@ -36,7 +36,7 @@ pub fn init_instance() {
             (3, 0, 1, 2),
         ];
         let constraints = generate_constraints(constraints_list);
-        *inst = Some(WFC::new(constraints, vec![1.0, 1.0, 1.0, 1.0], 42));
+        *inst = Some(WFC::new(constraints, vec![1.0, 1.0, 1.0, 10.0], 42));
     }
 }
 
@@ -119,6 +119,21 @@ impl WFC<[i64; 2], Vec<f64>> {
         return self.random_state;
     }
 
+    fn select_random_tile(&mut self, possible_idx: Vec<usize>) -> usize {
+        // assumes possible_idx are unique
+        let mut n = (self.rng_next() as f64) / (0xFFFFFFFFi64 as f64);
+        let distrib: Vec<f64> = possible_idx.iter().map(|i| self.state_weights[*i]).collect();
+        let distrib_sum: f64 = distrib.iter().sum();
+        let norm_distrib = distrib.iter().map(|p| *p / distrib_sum);
+        for (idx, p) in norm_distrib.enumerate() {
+            if n < p {
+                return possible_idx[idx];
+            }
+            n -= p;
+        }
+        possible_idx[possible_idx.len() - 1]
+    }
+
     fn entropy(&self, array: &Vec<f64>) -> f64 {
         array.iter().zip(self.state_weights.iter()).map(|(state, weight)| state * weight).map(plogp).sum::<f64>() * -1.0
     }
@@ -134,9 +149,10 @@ impl WFC<[i64; 2], Vec<f64>> {
             return false;
         }
         // super random idx choice
-        let idx = self.rng_next() % allowed_idx.len();
+        let tile_idx = self.select_random_tile(allowed_idx);
         // TODO: take weights into account
-        self.collapsed.insert(pos.clone(), allowed_idx[idx]);
+        // alias method, or compute cdf, a random 0-1 and pick idx where cdfi > random
+        self.collapsed.insert(pos.clone(), tile_idx);
         self.propagate(pos)
     }
 
@@ -338,15 +354,6 @@ mod tests {
     }
 
     #[test]
-    fn first_step_ok() {
-        let mut wfc = simple_init();
-        assert!(wfc.step());
-        // depends on the random selection of which state it collapse to...
-        // TODO: remove this test when all methods are covered
-        assert_eq!(wfc.collapsed.len(), 1);
-    }
-
-    #[test]
     fn step_n() {
         let mut wfc = simple_init();
         assert!(wfc.step());
@@ -355,7 +362,7 @@ mod tests {
         assert!(wfc.step());
         assert!(wfc.step());
         // remove this assert, the only constant is the wavefront size
-        assert_eq!(wfc.collapsed.len(), 8);
+        // assert_eq!(wfc.collapsed.len(), 6);
         assert_eq!(wfc.wavefront.len(), 2);
     }
 }

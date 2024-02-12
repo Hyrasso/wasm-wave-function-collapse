@@ -41,6 +41,14 @@ const mainSketch = (p) => {
       }
       if (x < -NTILE || x > NTILE) {
         p.noLoop();
+        // quick speed test
+        let t1 = window.performance.now()
+        let f = true;
+        let N = 100000;
+        for (let i=0;i < N;i+=1) {
+          f &= step();
+        }
+        console.log((window.performance.now() - t1) / N, "ms/it", f);
       }
     }
   }
