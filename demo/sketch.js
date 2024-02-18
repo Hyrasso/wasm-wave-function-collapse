@@ -2,11 +2,32 @@ import init, { init_instance, step, read_state } from './wave_function_collapse.
 
 
 const mainSketch = (p) => {
+
+  const init_constraints = [
+    [0, 0, -1, 1],
+    [0, 0, -1, 0],
+    [0, 0, 1, 0],
+    [0, 0, 1, 3],
+    [1, 0, -1, 2],
+    [1, 0, 1, 0],
+    [1, 0, -1, 3],
+    [1, 0, 1, 3],
+    [2, 0, -1, 2],
+    [2, 0, 1, 1],
+    [2, 0, 1, 2],
+    [2, 0, -1, 3],
+    [3, 0, -1, 0],
+    [3, 0, -1, 1],
+    [3, 0, 1, 1],
+    [3, 0, 1, 2],
+  ];
+  const tiles_weights = [1.0, 1.0, 1.0, 10.0];
   const NTILE = 40
   let loaded = false
   p.preload = async () => {
     await init();
-    init_instance();
+    // console.log(init_constraints);
+    init_instance(init_constraints, tiles_weights);
     loaded = true;
   }
   p.setup = () => {

@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use std::sync::Mutex;
 
 use wasm_bindgen::prelude::*;
+use serde_wasm_bindgen::from_value;
 // use serde::Serialize;
 
 // trait WFC<Cell> {
@@ -13,31 +14,23 @@ use wasm_bindgen::prelude::*;
 static INSTANCE: Mutex<Option<WFC<[i64; 2], Vec<f64>>>> = Mutex::new(None);
 
 #[wasm_bindgen]
-pub fn init_instance() {
+pub fn init_instance(constraints: JsValue, weights: JsValue) -> Result<String, String> {
     let mut inst = INSTANCE.lock().unwrap();
     if inst.is_none() {
         // ' #' '##' '# ' '  '
-        let constraints_list = vec![
-            (0, 0, -1, 1),
-            (0, 0, -1, 0),
-            (0, 0, 1, 0),
-            (0, 0, 1, 3),
-            (1, 0, -1, 2),
-            (1, 0, 1, 0),
-            (1, 0, -1, 3),
-            (1, 0, 1, 3),
-            (2, 0, -1, 2),
-            (2, 0, 1, 1),
-            (2, 0, 1, 2),
-            (2, 0, -1, 3),
-            (3, 0, -1, 0),
-            (3, 0, -1, 1),
-            (3, 0, 1, 1),
-            (3, 0, 1, 2),
-        ];
+        let constraints_list: Vec<(usize, usize, i64, usize)> = match from_value(constraints) {
+            Ok(val) => val,
+            Err(_) => return Err("Failed to init constraints".into())
+        };
+        let weight_states: Vec<f64> = match from_value(weights) {
+           Ok(val) => val,
+           Err(_) => return Err("Failed to init weights".into())
+        };
         let constraints = generate_constraints(constraints_list);
-        *inst = Some(WFC::new(constraints, vec![1.0, 1.0, 1.0, 10.0], 42));
+        *inst = Some(WFC::new(constraints, weight_states, 42));
+        return Ok("Ok".into());
     }
+    return Ok("Already set".into());
 }
 
 
