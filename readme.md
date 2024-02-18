@@ -24,10 +24,11 @@ Tile adjency constraints is a list containing:
 
 # TODO
 
-- [ ] Take constraints from JS
+- [x] Take constraints from JS
 - [ ] Change constraints to allowed neighbor tile instead of forbidden (easier to add tiles without having it show up at random places)
-- [ ] Set position dimension size to 3 in all cases (with the allowing neighbors formulation 1d/2d work the same, just ignoring an axis)
-- [ ] Better error reporting to Js
+- [X] Set position dimension size to 3 in all cases (with the allowing neighbors formulation 1d/2d work the same, just ignoring an axis)
+- [ ] Allow to not return all the dimensions
+- [ ] Better error reporting to Js (serde might be returning Err that could be returned to js directly)
 - [ ] Helpers for easier tiles constraints generation, one way could be have an adjency type  
     eg: (axis N, direction, connection id), then we can get allowed neighbors by checking other tiles conn id at axis N, in the opposite direction
 - [ ] Implement the NxN overlap model using this formulation

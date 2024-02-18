@@ -201,14 +201,15 @@ function debugString(val) {
 /**
 * @param {any} constraints
 * @param {any} weights
+* @param {any} seed
 * @returns {string}
 */
-export function init_instance(constraints, weights) {
+export function init_instance(constraints, weights, seed) {
     let deferred2_0;
     let deferred2_1;
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.init_instance(retptr, addHeapObject(constraints), addHeapObject(weights));
+        wasm.init_instance(retptr, addHeapObject(constraints), addHeapObject(weights), addHeapObject(seed));
         var r0 = getInt32Memory0()[retptr / 4 + 0];
         var r1 = getInt32Memory0()[retptr / 4 + 1];
         var r2 = getInt32Memory0()[retptr / 4 + 2];

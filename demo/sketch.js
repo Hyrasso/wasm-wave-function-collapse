@@ -27,7 +27,7 @@ const mainSketch = (p) => {
   p.preload = async () => {
     await init();
     // console.log(init_constraints);
-    init_instance(init_constraints, tiles_weights);
+    init_instance(init_constraints, tiles_weights, 41);
     loaded = true;
   }
   p.setup = () => {
@@ -48,7 +48,7 @@ const mainSketch = (p) => {
     console.log(state);
     let w = p.width / NTILE;
     p.noStroke();
-    for (let [x, y, tid] of state) {
+    for (let [x, y, _z, _w, tid] of state) {
       if (tid == 0) {
         p.circle(x * w + w / 2, 0, w);
         p.rect(x * w + w / 2, - w/2, w/2, w);

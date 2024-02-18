@@ -11,10 +11,12 @@ use serde_wasm_bindgen::from_value;
 //     fn collapsed() -> Vec<Cell>;
 // }
 
-static INSTANCE: Mutex<Option<WFC<[i64; 2], Vec<f64>>>> = Mutex::new(None);
+const NDIM: usize = 4;
+
+static INSTANCE: Mutex<Option<WFC<[i64; NDIM], Vec<f64>>>> = Mutex::new(None);
 
 #[wasm_bindgen]
-pub fn init_instance(constraints: JsValue, weights: JsValue) -> Result<String, String> {
+pub fn init_instance(constraints: JsValue, weights: JsValue, seed: JsValue) -> Result<String, String> {
     let mut inst = INSTANCE.lock().unwrap();
     if inst.is_none() {
         // ' #' '##' '# ' '  '
@@ -26,8 +28,13 @@ pub fn init_instance(constraints: JsValue, weights: JsValue) -> Result<String, S
            Ok(val) => val,
            Err(_) => return Err("Failed to init weights".into())
         };
+        let seed: usize = match from_value::<Option<usize>>(seed) {
+            Ok(val) => val.unwrap_or(42),
+            Err(_) => return Err("Failed to init weights".into())
+            
+        };
         let constraints = generate_constraints(constraints_list);
-        *inst = Some(WFC::new(constraints, weight_states, 42));
+        *inst = Some(WFC::new(constraints, weight_states, seed));
         return Ok("Ok".into());
     }
     return Ok("Already set".into());
@@ -81,7 +88,7 @@ fn generate_constraints(constraints: Vec<(usize, usize, i64, usize)>) -> HashMap
     cm
 }
 
-impl WFC<[i64; 2], Vec<f64>> {
+impl WFC<[i64; NDIM], Vec<f64>> {
     fn new(constraints: HashMap<(usize, usize, i64), HashSet<usize>>, state_weights: Vec<f64>, random_state: usize) -> Self {
         let weight_sum: f64 = state_weights.iter().sum();
         let weight_distrib = state_weights.iter().map(|val| val / weight_sum).collect();
@@ -131,7 +138,7 @@ impl WFC<[i64; 2], Vec<f64>> {
         array.iter().zip(self.state_weights.iter()).map(|(state, weight)| state * weight).map(plogp).sum::<f64>() * -1.0
     }
 
-    fn collapse(&mut self, pos: [i64; 2]) -> bool {
+    fn collapse(&mut self, pos: [i64; NDIM]) -> bool {
         if self.collapsed.contains_key(&pos) {
             return true;
         }
@@ -158,7 +165,7 @@ impl WFC<[i64; 2], Vec<f64>> {
         return ns;
     }
 
-    fn state_at(&self, pos: &[i64; 2]) -> Vec<f64> {
+    fn state_at(&self, pos: &[i64; NDIM]) -> Vec<f64> {
         match self.collapsed.get(pos) {
             Some(tile_idx) => self.state_from_idx(*tile_idx),
             None => match self.wavefront.get(pos) {
@@ -168,7 +175,7 @@ impl WFC<[i64; 2], Vec<f64>> {
         }
     }
 
-    fn set_state_at(&mut self, pos: [i64; 2], state: Vec<f64>) {
+    fn set_state_at(&mut self, pos: [i64; NDIM], state: Vec<f64>) {
         let mut allowed_tiles = state.iter().enumerate().filter_map(|(idx, v)| if *v > 0.0 { Some(idx) } else { None });
         let tile_id = allowed_tiles.next();
         // if tile_id is none that means the provided state has 0 allowed state
@@ -179,7 +186,7 @@ impl WFC<[i64; 2], Vec<f64>> {
         }
     }
 
-    fn exclude(&mut self, forbidden_states: HashSet<usize>, neighbor: [i64; 2]) -> UpdateState {
+    fn exclude(&mut self, forbidden_states: HashSet<usize>, neighbor: [i64; NDIM]) -> UpdateState {
         let mut state = self.state_at(&neighbor);
         let mut updated = false;
         for i in forbidden_states {
@@ -198,7 +205,7 @@ impl WFC<[i64; 2], Vec<f64>> {
         UpdateState::Updated
     }
 
-    fn update_neighbor(&mut self, pos: &[i64; 2], dpos: (usize, i64)) -> UpdateState {
+    fn update_neighbor(&mut self, pos: &[i64; NDIM], dpos: (usize, i64)) -> UpdateState {
         let current_state = self.state_at(pos);
         let (axis, dir) = dpos;
         let mut neighbor_forbidden: Option<HashSet<usize>> = None;
@@ -224,7 +231,7 @@ impl WFC<[i64; 2], Vec<f64>> {
     }
 
     // returns false if the propagation resulted in an impossible state
-    fn propagate(&mut self, pos: [i64; 2]) -> bool {
+    fn propagate(&mut self, pos: [i64; NDIM]) -> bool {
         let mut stack = vec![pos];
 
         while let Some(pos) = stack.pop() {
@@ -256,7 +263,7 @@ impl WFC<[i64; 2], Vec<f64>> {
         let pos = match min_h_cell{
             Some(value) => value.0,
             // TODO: get a the closest tile to 0,0 that is not collapsed
-            None => &[0, 0],
+            None => &[0; NDIM],
         };
         let pos = pos.clone();
 
@@ -286,7 +293,7 @@ mod tests {
         ];
     }
 
-    fn simple_init() -> WFC<[i64; 2], Vec<f64>> {
+    fn simple_init() -> WFC<[i64; NDIM], Vec<f64>> {
         let constraint_list = simple_constraints();
         let constraints = generate_constraints(constraint_list);
         let wfc = WFC::new(constraints, vec![1.0, 1.0, 1.0], 42);
@@ -342,7 +349,7 @@ mod tests {
     #[test]
     fn collapse() {
         let mut wfc = simple_init();
-        let r = wfc.collapse([0, 0]);
+        let r = wfc.collapse([0; NDIM]);
         assert!(r);
     }
 
