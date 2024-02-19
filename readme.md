@@ -1,5 +1,7 @@
 Implementation of wave function collapse in rust/wasm
 
+Demo page: https://hyrasso.github.io/wasm-wave-function-collapse/demo/
+
 # Requirements
 
 - rust
@@ -30,6 +32,7 @@ Tile adjency constraints is a list containing:
 - [X] Set position dimension size to 3 in all cases (with the allowing neighbors formulation 1d/2d work the same, just ignoring an axis)
 - [ ] Allow to not return all the dimensions
 - [ ] Better error reporting to Js (serde might be returning Err that could be returned to js directly)
+- [ ] Better demo
 - [ ] Helpers for easier tiles constraints generation, one way could be have an adjency type  
     eg: (axis N, direction, connection id), then we can get allowed neighbors by checking other tiles conn id at axis N, in the opposite direction
 - [ ] Implement the NxN overlap model using this formulation
