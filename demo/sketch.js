@@ -22,17 +22,17 @@ const mainSketch = (p) => {
     [3, 0, 1, 0],
     [3, 0, 1, 3],
   ];
-  const tiles_weights = [1.0, 1.0, 1.0, 10.0];
+  const tiles_weights = [1.0, 1.0, 1.0, 2.0];
   const NTILE = 40
   let loaded = false
   p.preload = async () => {
     await init();
     // console.log(init_constraints);
-    init_instance(init_constraints, tiles_weights, 43);
+    init_instance(init_constraints, tiles_weights, Math.ceil(Math.random() * 0xFFFFFFFF));
     loaded = true;
   }
   p.setup = () => {
-    p.createCanvas(400, 400);
+    p.createCanvas(window.innerWidth, window.innerHeight);
     p.background(200);
   }
 
