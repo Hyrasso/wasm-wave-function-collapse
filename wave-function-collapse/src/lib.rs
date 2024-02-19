@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::cmp::Ordering;
+use std::ops::Sub;
 use std::sync::Mutex;
 
 use wasm_bindgen::prelude::*;
@@ -78,6 +79,7 @@ fn plogp(p: f64) -> f64 {
 }
 
 
+#[derive(PartialEq, Debug)]
 enum UpdateState { Updated, ImpossibleState, NothingToDo }
 
 fn generate_constraints(constraints: Vec<(usize, usize, i64, usize)>) -> HashMap<(usize, usize, i64), HashSet<usize>> {
@@ -109,6 +111,10 @@ impl WFC<[i64; NDIM], Vec<f64>> {
         let mut state = vec![0.0; self.state_weights.len()];
         state[idx] = 1.0;
         state
+    }
+
+    fn all_states(&self) -> HashSet<usize>{
+        (0..self.state_weights.len()).collect()
     }
 
     fn rng_next(&mut self) -> usize {
@@ -208,24 +214,26 @@ impl WFC<[i64; NDIM], Vec<f64>> {
     fn update_neighbor(&mut self, pos: &[i64; NDIM], dpos: (usize, i64)) -> UpdateState {
         let current_state = self.state_at(pos);
         let (axis, dir) = dpos;
-        let mut neighbor_forbidden: Option<HashSet<usize>> = None;
+        let mut neighbor_allowed: Option<HashSet<usize>> = None;
         for (i, val) in current_state.iter().enumerate() {
             if *val > 0.0 {
-                if let Some(forbidden_tiles) = self.constraints.get(&(i, axis, dir)) {
-                    neighbor_forbidden = match neighbor_forbidden {
-                        None => Some(forbidden_tiles.clone()),
-                        Some(nf) => Some(forbidden_tiles.clone().intersection(&nf).copied().collect::<HashSet<usize>>())
+                if let Some(allowed_tiles) = self.constraints.get(&(i, axis, dir)) {
+                    neighbor_allowed = match neighbor_allowed {
+                        None => Some(allowed_tiles.clone()),
+                        Some(nf) => Some(allowed_tiles.clone().union(&nf).copied().collect::<HashSet<usize>>())
                     }
                 }
             }
         }
-        match neighbor_forbidden {
+        match neighbor_allowed {
             None => UpdateState::NothingToDo,
-            Some(forbidden_states) if forbidden_states.len() == 0 => UpdateState::NothingToDo,
-            Some(forbidden_states) => {
+            Some(allowed_states) => {
                 let mut neighbor = pos.clone();
                 neighbor[dpos.0] += dpos.1;
-                self.exclude(forbidden_states.clone(), neighbor)
+                // change this so that exclude becomes exclude not allowed and takes the allowed_states,
+                // and does an intersection with current possible states
+                let forbidden_states = self.all_states().sub(&allowed_states);
+                self.exclude(forbidden_states, neighbor)
             }
         }
     }
@@ -244,7 +252,7 @@ impl WFC<[i64; NDIM], Vec<f64>> {
                         neighbor[neighbors_dpos.0] += neighbors_dpos.1;
                         stack.push(neighbor.clone());
                     },
-                    UpdateState::ImpossibleState => return false,
+                    UpdateState::ImpossibleState => {dbg!(pos, neighbors_dpos); return false},
                     UpdateState::NothingToDo => ()
                 }
             }
@@ -282,14 +290,16 @@ mod tests {
     fn simple_constraints() -> Vec<(usize, usize, i64, usize)> {
         // dummy example with one axis and 3 tiles (' #' '##' '# ')
         return vec![
-            (0, 0, -1, 1),
-            (0, 0, -1, 0),
-            (0, 0, 1, 0),
-            (1, 0, -1, 2),
-            (1, 0, 1, 0),
-            (2, 0, -1, 2),
-            (2, 0, 1, 1),
-            (2, 0, 1, 2),
+            (0, 0, -1, 2),
+            (0, 0, 1, 1),
+            (0, 0, 1, 2),
+            (1, 0, -1, 0),
+            (1, 0, -1, 1),
+            (1, 0, 1, 1),
+            (1, 0, 1, 2),
+            (2, 0, -1, 0),
+            (2, 0, -1, 1),
+            (2, 0, 1, 0),
         ];
     }
 
@@ -305,8 +315,8 @@ mod tests {
     fn gen_contraints() {
         let contraints_list = simple_constraints();
         let constraints = generate_constraints(contraints_list);
-        assert_eq!(constraints.get(&(0, 0, -1)), Some(&HashSet::from([0, 1])));
-        assert_eq!(constraints.get(&(0, 0, 1)), Some(&HashSet::from([0])));
+        assert_eq!(constraints.get(&(0, 0, -1)), Some(&HashSet::from([2])));
+        assert_eq!(constraints.get(&(0, 0, 1)), Some(&HashSet::from([1, 2])));
         assert!(constraints.get(&(0, 1, 1)).is_none());
     }
 
@@ -345,12 +355,35 @@ mod tests {
         let state2 = vec![1.0, 1.0, 0.0];
         assert!(wfc.entropy(&state) > wfc.entropy(&state2));
     }
+    
+    #[test]
+    fn test_update_neighbor() {
+        let mut wfc = simple_init();
+        wfc.collapsed.insert([0; NDIM], 0);
+        let update_result = wfc.update_neighbor(&[0; NDIM], (0, 1));
+        assert_eq!(update_result, UpdateState::Updated);
+        assert_eq!(wfc.wavefront.get(&[1, 0, 0, 0]), Some(&vec![0.0, 1.0, 1.0]));
+        let update_result = wfc.update_neighbor(&[0; NDIM], (0, -1));
+        assert_eq!(update_result, UpdateState::Updated);
+        assert_eq!(wfc.collapsed.get(&[-1, 0, 0, 0]), Some(&2));
+    }
+
+    #[test]
+    fn test_propagate() {
+        let mut wfc = simple_init();
+        wfc.collapsed.insert([0; NDIM], 0);
+        let propagate_success = wfc.propagate([0; NDIM]);
+        assert!(propagate_success);
+        assert_eq!(wfc.collapsed.get(&[-1, 0, 0, 0]), Some(&2));
+        assert_eq!(wfc.wavefront.get(&[1, 0, 0, 0]), Some(&vec![0.0, 1.0, 1.0]));
+        assert_eq!(wfc.wavefront.get(&[-2, 0, 0, 0]), Some(&vec![1.0, 1.0, 0.0]));
+    }
 
     #[test]
     fn collapse() {
         let mut wfc = simple_init();
-        let r = wfc.collapse([0; NDIM]);
-        assert!(r);
+        let collapse_success = wfc.collapse([0; NDIM]);
+        assert!(collapse_success);
     }
 
     #[test]
