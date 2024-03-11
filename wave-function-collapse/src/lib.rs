@@ -122,7 +122,7 @@ impl WFC<[i64; NDIM], Vec<f64>> {
         let c = 1013904223;
         let m = 0xFFFFFFFF; // 2**32
         self.random_state = self.random_state.wrapping_mul(a).wrapping_add(c) % m;
-        return self.random_state;
+        self.random_state
     }
 
     fn select_random_tile(&mut self, possible_idx: Vec<usize>) -> usize {
@@ -142,6 +142,8 @@ impl WFC<[i64; NDIM], Vec<f64>> {
 
     fn entropy(&self, array: &Vec<f64>) -> f64 {
         array.iter().zip(self.state_weights.iter()).map(|(state, weight)| state * weight).map(plogp).sum::<f64>() * -1.0
+        // For ordering purposes this should be equivalent?
+        // array.iter().zip(self.state_weights.iter()).map(|(state, weight)| state * weight).sum::<f64>()
     }
 
     fn collapse(&mut self, pos: [i64; NDIM]) -> bool {
@@ -187,6 +189,7 @@ impl WFC<[i64; NDIM], Vec<f64>> {
         // if tile_id is none that means the provided state has 0 allowed state
         if allowed_tiles.next().is_none() && tile_id.is_some() {
             self.collapsed.insert(pos, tile_id.unwrap());
+            self.wavefront.remove(&pos);
         } else {
             self.wavefront.insert(pos, state);
         }
@@ -239,6 +242,7 @@ impl WFC<[i64; NDIM], Vec<f64>> {
     }
 
     // returns false if the propagation resulted in an impossible state
+    // Return a result instead
     fn propagate(&mut self, pos: [i64; NDIM]) -> bool {
         let mut stack = vec![pos];
 
@@ -260,22 +264,37 @@ impl WFC<[i64; NDIM], Vec<f64>> {
         true
     }
 
-    fn step(&mut self) -> bool {
-        // get the min entropy cell
+    fn cell_to_collapse(&self) -> [i64; NDIM] {
         let min_h_cell = self.wavefront.iter().min_by(|a, b|
             match f64::total_cmp(&self.entropy(a.1), &self.entropy(b.1)) {
                 Ordering::Greater => Ordering::Greater,
                 Ordering::Less => Ordering::Less,
-                Ordering::Equal => i64::cmp(&a.0.iter().map(|v| v.abs()).max().unwrap(), &b.0.iter().map(|v| v.abs()).max().unwrap())
+                // to make ordering deterministic take tile closest to origin, according to infinite distance
+                Ordering::Equal => {
+                    let mut coords_a = a.0.iter().enumerate().map(|(idx, c)| (c.abs(), *c < 0, -(idx as i64))).collect::<Vec<_>>();
+                    let mut coords_b = b.0.iter().enumerate().map(|(idx, c)| (c.abs(), *c < 0, -(idx as i64))).collect::<Vec<_>>();
+                    // abs coord, is positive, -axis index, sorted lowest to highest
+                    // should sort by: lowest coord, positive first, lowest axis first
+                    coords_a.sort();
+                    coords_b.sort();
+                    coords_a.iter().zip(coords_b.iter()).fold(Ordering::Equal, |acc, (ea, eb)| if acc != Ordering::Equal {acc} else {ea.cmp(&eb)})
+                }
             });
+        dbg!(min_h_cell);
         let pos = match min_h_cell{
             Some(value) => value.0,
-            // TODO: get a the closest tile to 0,0 that is not collapsed
             None => &[0; NDIM],
         };
-        let pos = pos.clone();
+        debug_assert!(!self.collapsed.contains_key(pos), "Selected a collapsed cell");
+        pos.clone()
+    }
+
+    fn step(&mut self) -> bool {
+        // get the min entropy cell
+        let pos = self.cell_to_collapse();
 
         // collapse the cell and propagate
+        // dbg!(pos);
         return self.collapse(pos);
     }
 }
@@ -303,10 +322,81 @@ mod tests {
         ];
     }
 
+    fn constraints_2d() -> Vec<(usize, usize, i64, usize)> {
+        // `└┌┐┘·`
+        // 0    1    2    3    4
+        // .#.  ...  ...  .#.  ...
+        // .##  .##  ##.  ##.  ...
+        // ...  .#.  .#.  ...  ...
+        // axis 1:x, 2:y, direction: 1:rigt, 1:down
+        return vec![
+            (0,0,1,2),
+            (0,0,1,3),
+            (0,0,-1,2),
+            (0,0,-1,3),
+            (0,0,-1,4),
+            (0,1,1,1),
+            (0,1,1,2),
+            (0,1,1,4),
+            (0,1,-1,1),
+            (0,1,-1,2),
+            (1,0,1,2),
+            (1,0,1,3),
+            (1,0,-1,2),
+            (1,0,-1,3),
+            (1,0,-1,4),
+            (1,1,1,0),
+            (1,1,1,3),
+            (1,1,-1,0),
+            (1,1,-1,3),
+            (1,1,-1,4),
+            (2,0,1,0),
+            (2,0,1,1),
+            (2,0,1,4),
+            (2,0,-1,0),
+            (2,0,-1,1),
+            (2,1,1,0),
+            (2,1,1,3),
+            (2,1,-1,0),
+            (2,1,-1,3),
+            (2,1,-1,4),
+            (3,0,1,0),
+            (3,0,1,1),
+            (3,0,1,4),
+            (3,0,-1,0),
+            (3,0,-1,1),
+            (3,1,1,1),
+            (3,1,1,2),
+            (3,1,1,4),
+            (3,1,-1,1),
+            (3,1,-1,2),
+            (4,0,1,0),
+            (4,0,1,1),
+            (4,0,1,4),
+            (4,0,-1,2),
+            (4,0,-1,3),
+            (4,0,-1,4),
+            (4,1,1,1),
+            (4,1,1,2),
+            (4,1,1,4),
+            (4,1,-1,0),
+            (4,1,-1,3),
+            (4,1,-1,4),
+        ];
+    }
+
     fn simple_init() -> WFC<[i64; NDIM], Vec<f64>> {
         let constraint_list = simple_constraints();
         let constraints = generate_constraints(constraint_list);
         let wfc = WFC::new(constraints, vec![1.0, 1.0, 1.0], 42);
+        
+        return wfc;
+    }
+
+    fn init_2d() -> WFC<[i64; NDIM], Vec<f64>> {
+        let constraint_list = constraints_2d();
+        let constraints = generate_constraints(constraint_list);
+        let wfc = WFC::new(constraints, vec![1.0, 1.0, 1.0, 1.0, 1.0], 42);
         
         return wfc;
     }
@@ -330,6 +420,15 @@ mod tests {
     }
 
     #[test]
+    fn init_wfc_2d() {
+        let wfc = init_2d();
+
+        assert_eq!(wfc.collapsed.len(), 0);
+        assert_eq!(wfc.wavefront.len(), 0);
+        assert_eq!(wfc.constraints.len(), 20);
+    }
+
+    #[test]
     fn logprob_f() {
         assert_eq!(plogp(0.0), 0.0);
         assert_eq!(plogp(1.0), 0.0);
@@ -350,8 +449,9 @@ mod tests {
         let wfc = simple_init();
 
         let state = vec![1.0, 1.0, 1.0];
-        let target = f64::log2(1.0/3.0) * -3.0;
-        assert!(wfc.entropy(&state) - target < 1e6);
+        let target = f64::log2(1.0/3.0) * 1.0/3.0 * 3.0 * -1.0;
+        dbg!(wfc.entropy(&state), target);
+        assert!((wfc.entropy(&state) - target).abs() < 1e-6);
         let state2 = vec![1.0, 1.0, 0.0];
         assert!(wfc.entropy(&state) > wfc.entropy(&state2));
     }
@@ -369,6 +469,30 @@ mod tests {
     }
 
     #[test]
+    fn test_update_neighbor_2d() {
+        let mut wfc = init_2d();
+        // └
+        wfc.collapsed.insert([0; NDIM], 0);
+        let update_result = wfc.update_neighbor(&[0; NDIM], (0, 1));
+        assert_eq!(update_result, UpdateState::Updated);
+        // └┐ or └┘
+        assert_eq!(wfc.wavefront.get(&[1, 0, 0, 0]), Some(&vec![0.0, 0.0, 1.0, 1.0, 0.0]));
+        let update_result = wfc.update_neighbor(&[0; NDIM], (0, -1));
+        assert_eq!(update_result, UpdateState::Updated);
+        // ┐└ or ┘└ or ·└
+        assert_eq!(wfc.wavefront.get(&[-1, 0, 0, 0]), Some(&vec![0.0, 0.0, 1.0, 1.0, 1.0]));
+        // └·
+        // ·└
+        wfc.collapsed.insert([1, 1, 0, 0], 0);
+        let update_result = wfc.update_neighbor(&[1, 1, 0, 0], (1, -1));
+        assert_eq!(update_result, UpdateState::Updated);
+        // └x
+        // ·└
+        // -> x : ┐
+        assert_eq!(wfc.collapsed.get(&[1, 0, 0, 0]), Some(&2));
+    }
+
+    #[test]
     fn test_propagate() {
         let mut wfc = simple_init();
         wfc.collapsed.insert([0; NDIM], 0);
@@ -380,10 +504,46 @@ mod tests {
     }
 
     #[test]
+    fn test_propagate_2d() {
+        let mut wfc = init_2d();
+        wfc.collapsed.insert([0; NDIM], 0);
+        let propagate_success = wfc.propagate([0; NDIM]);
+        assert!(propagate_success);
+    }
+
+    #[test]
     fn collapse() {
         let mut wfc = simple_init();
         let collapse_success = wfc.collapse([0; NDIM]);
         assert!(collapse_success);
+    }
+
+    #[test]
+    fn collapse_2d() {
+        let mut wfc = init_2d();
+        let collapse_success = wfc.collapse([0; NDIM]);
+        assert!(collapse_success);
+    }
+
+    #[test]
+    fn cell_to_collapse() {
+        let mut wfc = init_2d();
+        let cell = wfc.cell_to_collapse();
+        assert_eq!(cell, [0, 0, 0, 0]);
+    
+        wfc.collapsed.insert([0; NDIM], 0);
+        wfc.wavefront.insert([0, 1, 0, 0], vec![1.0, 1.0, 1.0, 1.0, 1.0]);
+        let cell = wfc.cell_to_collapse();
+        assert_eq!(cell, [0, 1, 0, 0]);
+    
+        wfc.wavefront.insert([0, -1, 0, 0], vec![1.0, 1.0, 1.0, 1.0, 1.0]);
+        let cell = wfc.cell_to_collapse();
+        assert_eq!(cell, [0, 1, 0, 0]);
+
+        wfc.wavefront.insert([1, 0, 0, 0], vec![1.0, 1.0, 1.0, 1.0, 1.0]);
+        let cell = wfc.cell_to_collapse();
+        assert_eq!(cell, [1, 0, 0, 0]);
+
     }
 
     #[test]
@@ -397,5 +557,25 @@ mod tests {
         // remove this assert, the only constant is the wavefront size
         // assert_eq!(wfc.collapsed.len(), 6);
         assert_eq!(wfc.wavefront.len(), 2);
+    }
+
+    #[test]
+    fn step_n_2d() {
+        let mut wfc = init_2d();
+        for i in 0..10 {
+            let len_collapsed = wfc.collapsed.len();
+            assert!(wfc.step());
+            if wfc.collapsed.len() <= len_collapsed {
+                // dbg!(&wfc.collapsed);
+                // dbg!(&wfc.wavefront);
+            }
+            assert!(wfc.collapsed.len() > len_collapsed, "Collapsed count didnt increase at step # {}", i);
+            // dbg!(wfc.collapsed.len());
+            // dbg!(&wfc.wavefront.len());
+            // dbg!(&wfc.wavefront);
+        }
+        // remove this assert, the only constant is the wavefront size
+        // assert_eq!(wfc.collapsed.len(), 6);
+        // assert_eq!(wfc.wavefront.len(), 14);
     }
 }
